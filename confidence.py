@@ -1,19 +1,8 @@
 """
 confidence.py
 Calculates a confidence score (0-10) for each startup analysis.
-Shows recruiters you understand LLM reliability.
-
-Scoring logic:
-- Website scraped successfully:     +3 points
-- Founders named and verified:      +2 points
-- Founded year confirmed:           +1 point
-- Competitors named specifically:   +1 point
-- AI architecture is specific:      +2 points
-  (not generic phrases like "uses AI")
-- HQ location confirmed:            +1 point
-Max = 10 points
+Measures how much data came from real scraped sources vs inference.
 """
-
 
 GENERIC_ARCH_PHRASES = [
     "uses ai", "uses machine learning", "uses advanced ai",
@@ -23,25 +12,22 @@ GENERIC_ARCH_PHRASES = [
 ]
 
 
-def calculate_confidence(startup_data: dict) -> tuple[float, str]:
+def calculate_confidence(startup_data: dict):
     """
-    Returns (confidence_score, breakdown_string).
-    startup_data keys: website_url, founders, founded_year,
-    competitors, ai_architecture, hq_location,
-    scrape_succeeded (bool)
+    Returns (confidence_score float, breakdown string).
     """
     score = 0.0
     breakdown = []
 
-    # Website scraped successfully
+    # Website scraped successfully +3
     scrape_ok = startup_data.get("scrape_succeeded", False)
     if scrape_ok:
         score += 3.0
         breakdown.append("Website scraped: +3.0")
     else:
-        breakdown.append("Website scraped: +0.0 (used search fallback)")
+        breakdown.append("Website scraped: +0.0 (search fallback)")
 
-    # Founders named
+    # Founders named and verified +2
     founders = startup_data.get("founders", "")
     if founders and founders.lower() not in (
         "not specified", "unknown", "not found", ""
@@ -49,9 +35,9 @@ def calculate_confidence(startup_data: dict) -> tuple[float, str]:
         score += 2.0
         breakdown.append("Founders verified: +2.0")
     else:
-        breakdown.append("Founders verified: +0.0 (not found)")
+        breakdown.append("Founders verified: +0.0")
 
-    # Founded year confirmed
+    # Founded year confirmed +1
     year = str(startup_data.get("founded_year", ""))
     if year and year.isdigit() and int(year) >= 2020:
         score += 1.0
@@ -59,7 +45,7 @@ def calculate_confidence(startup_data: dict) -> tuple[float, str]:
     else:
         breakdown.append("Founded year confirmed: +0.0")
 
-    # Competitors named specifically
+    # Competitors named specifically +1
     competitors = startup_data.get("competitors", "")
     if competitors and len(competitors) > 20 and (
         "unknown" not in competitors.lower()
@@ -67,11 +53,13 @@ def calculate_confidence(startup_data: dict) -> tuple[float, str]:
         score += 1.0
         breakdown.append("Competitors named: +1.0")
     else:
-        breakdown.append("Competitors named: +0.0 (generic)")
+        breakdown.append("Competitors named: +0.0")
 
-    # AI architecture is specific
+    # AI architecture is specific +2
     arch = startup_data.get("ai_architecture", "").lower()
-    is_generic = any(phrase in arch for phrase in GENERIC_ARCH_PHRASES)
+    is_generic = any(
+        phrase in arch for phrase in GENERIC_ARCH_PHRASES
+    )
     if arch and not is_generic and len(arch) > 15:
         score += 2.0
         breakdown.append("AI architecture specific: +2.0")
@@ -79,17 +67,16 @@ def calculate_confidence(startup_data: dict) -> tuple[float, str]:
         score += 0.5
         breakdown.append("AI architecture specific: +0.5 (inferred)")
 
-    # HQ location confirmed
+    # HQ location confirmed +1
     hq = startup_data.get("hq_location", "")
     if hq and hq.lower() not in ("not specified", "unknown", ""):
         score += 1.0
-        breakdown.append("HQ location confirmed: +1.0")
+        breakdown.append("HQ confirmed: +1.0")
     else:
-        breakdown.append("HQ location confirmed: +0.0")
+        breakdown.append("HQ confirmed: +0.0")
 
     score = min(round(score, 1), 10.0)
-    breakdown_str = " | ".join(breakdown)
-    return score, breakdown_str
+    return score, " | ".join(breakdown)
 
 
 def confidence_label(score: float) -> str:

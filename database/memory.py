@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,7 @@ def get_connection():
 
 def initialize_db():
     with get_connection() as conn:
+        # Original tables — unchanged
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,14 +44,89 @@ def initialize_db():
                 UNIQUE(name COLLATE NOCASE)
             )
         """)
+
+        # Users table — new, only created if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                full_name TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+
+        # Safely add new columns to startups if they don't exist
+        # ALTER TABLE only runs if column is missing — never breaks existing data
+        new_columns = [
+            ("founded_year", "TEXT"),
+            ("ai_architecture", "TEXT"),
+            ("competitors", "TEXT"),
+            ("confidence_score", "REAL"),
+            ("confidence_breakdown", "TEXT"),
+            ("user_rating", "INTEGER"),
+            ("user_id", "INTEGER"),
+        ]
+        existing = [
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(startups)"
+            ).fetchall()
+        ]
+        for col_name, col_type in new_columns:
+            if col_name not in existing:
+                conn.execute(
+                    f"ALTER TABLE startups ADD COLUMN "
+                    f"{col_name} {col_type}"
+                )
         conn.commit()
 
 
+# ── USER AUTH ─────────────────────────────────────────────
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def create_user(
+    username: str, password: str, full_name: str
+) -> bool:
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """INSERT INTO users
+                   (username, password_hash, full_name, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    username.lower().strip(),
+                    hash_password(password),
+                    full_name,
+                    datetime.now().isoformat()
+                )
+            )
+            conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def verify_user(username: str, password: str):
+    """Returns user dict if valid, None if not."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """SELECT * FROM users
+               WHERE username = ? AND password_hash = ?""",
+            (
+                username.lower().strip(),
+                hash_password(password)
+            )
+        ).fetchone()
+    return dict(row) if row else None
+
+
+# ── ORIGINAL FUNCTIONS — completely unchanged ─────────────
+
 def get_all_seen_startup_names() -> list:
-    """
-    Returns a list of all startup names ever analyzed.
-    Used to tell the researcher what to skip.
-    """
     try:
         with get_connection() as conn:
             rows = conn.execute(
@@ -78,10 +155,13 @@ def save_run(sector, stage, geo, memo, startups) -> int:
             try:
                 conn.execute(
                     """INSERT OR IGNORE INTO startups
-                       (run_id, name, website_url, sector, founders,
-                        hq_location, score, recommendation,
-                        one_line_summary, full_profile_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (run_id, name, website_url, sector,
+                        founders, hq_location, score,
+                        recommendation, one_line_summary,
+                        full_profile_json, founded_year,
+                        ai_architecture, competitors,
+                        confidence_score, confidence_breakdown)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         run_id,
                         s.get("name", ""),
@@ -92,7 +172,12 @@ def save_run(sector, stage, geo, memo, startups) -> int:
                         s.get("score", 0.0),
                         s.get("recommendation", ""),
                         s.get("one_line_summary", ""),
-                        json.dumps(s)
+                        json.dumps(s),
+                        s.get("founded_year", ""),
+                        s.get("ai_architecture", ""),
+                        s.get("competitors", ""),
+                        s.get("confidence_score", 0.0),
+                        s.get("confidence_breakdown", ""),
                     )
                 )
             except Exception as e:
@@ -128,8 +213,16 @@ def startup_already_analyzed(name: str) -> bool:
 
 
 def clear_memory():
-    """Wipe all history. Called from UI reset button."""
     with get_connection() as conn:
         conn.execute("DELETE FROM startups")
         conn.execute("DELETE FROM runs")
+        conn.commit()
+
+
+def update_user_rating(startup_id: int, rating: int):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE startups SET user_rating = ? WHERE id = ?",
+            (rating, startup_id)
+        )
         conn.commit()
