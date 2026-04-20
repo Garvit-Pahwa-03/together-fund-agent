@@ -1,0 +1,6 @@
+Together Fund Investment Thesis:
+- We invest in Early-Stage AI startups in the US-India corridor.
+- We love "Agentic Workflows" and "Skill Layers for AI" (e.g., Composio).
+- We prefer vertical AI applications (e.g., AI for Healthcare, AI for Legal) over thin wrappers around ChatGPT.
+- Red flags: No clear technical moat, purely relying on prompt engineering, high API inference costs.
+- Green flags: Custom model finetuning, proprietary data access, strong open-source community presence.
