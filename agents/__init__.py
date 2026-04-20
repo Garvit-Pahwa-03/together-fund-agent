@@ -1,3 +1,4 @@
+import patch
 import os
 from crewai import Agent
 from crewai_tools import SerperDevTool
