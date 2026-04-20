@@ -27,7 +27,6 @@ st.set_page_config(
 
 initialize_db()
 
-# ── SESSION STATE ─────────────────────────────────────────
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -63,7 +62,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── AUTH SCREEN ───────────────────────────────────────────
 def show_auth():
     st.markdown(
         '<p class="main-header" style="text-align:center">'
@@ -76,7 +74,6 @@ def show_auth():
         '</p>',
         unsafe_allow_html=True
     )
-
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         mode = st.radio(
@@ -109,7 +106,6 @@ def show_auth():
                         st.error("Invalid username or password.")
                 else:
                     st.warning("Please fill in both fields.")
-
         else:
             st.markdown("#### Create account")
             full_name = st.text_input(
@@ -133,7 +129,9 @@ def show_auth():
                 if not all([full_name, username, password, password2]):
                     st.warning("Please fill in all fields.")
                 elif len(password) < 6:
-                    st.warning("Password must be at least 6 characters.")
+                    st.warning(
+                        "Password must be at least 6 characters."
+                    )
                 elif password != password2:
                     st.error("Passwords do not match.")
                 else:
@@ -144,15 +142,16 @@ def show_auth():
                         st.error("Username already taken.")
 
 
-# ── MAIN APP ──────────────────────────────────────────────
 def show_app():
     user = st.session_state.user
+    user_id = user["id"]  # every DB call uses this
 
     groq_key = os.getenv("GROQ_API_KEY", "")
     serper_key = os.getenv("SERPER_API_KEY", "")
-    seen_names = get_all_seen_startup_names()
 
-    # ── SIDEBAR — exactly as before + sign out ────────────
+    # All memory calls scoped to this user
+    seen_names = get_all_seen_startup_names(user_id)
+
     with st.sidebar:
         st.markdown("### Together Fund")
         st.markdown(f"*Signed in as **{user['full_name']}***")
@@ -191,13 +190,11 @@ def show_app():
         )
 
         st.divider()
-
-        # Memory panel — exactly as before
-        st.markdown("#### Agent Memory")
+        st.markdown("#### Your Memory")
         if seen_names:
             st.caption(
-                f"{len(seen_names)} startups remembered. "
-                f"Agent will find new ones automatically."
+                f"{len(seen_names)} startups in your history. "
+                f"Agent finds new ones automatically."
             )
             memory_html = "".join(
                 f'<span class="memory-pill">{n}</span>'
@@ -206,20 +203,18 @@ def show_app():
             st.markdown(memory_html, unsafe_allow_html=True)
             st.markdown("")
             if st.button(
-                "Clear Memory",
+                "Clear My Memory",
                 type="secondary",
                 use_container_width=True,
-                help="Wipe history so agent can find these again"
+                help="Only clears your history, not other users"
             ):
-                clear_memory()
-                st.success("Memory cleared!")
+                clear_memory(user_id)
+                st.success("Your memory cleared!")
                 st.rerun()
         else:
-            st.caption("No startups in memory yet.")
+            st.caption("No startups in your history yet.")
 
         st.divider()
-
-        # API status — exactly as before
         st.markdown("#### API Status")
         if groq_key and groq_key != "your_groq_key_here":
             st.success("Groq API connected")
@@ -229,22 +224,17 @@ def show_app():
             st.success("Serper API connected")
         else:
             st.error("Serper API key missing")
-
         st.divider()
         st.markdown("**Model:** llama-3.3-70b-versatile")
         st.markdown("**Finds:** 1 new startup per scan")
-        st.markdown("**Memory:** SQLite (auto-dedup)")
+        st.markdown("**Memory:** Per-user SQLite")
 
-    # ── TABS — original 3 + 2 new ones ───────────────────
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "New Scan",
-        "Comparison View",
-        "Run History",
-        "All Startups",
-        "My Ratings"
+        "New Scan", "Comparison View",
+        "Run History", "All Startups", "My Ratings"
     ])
 
-    # ── TAB 1: NEW SCAN — exactly as before ───────────────
+    # ── TAB 1: NEW SCAN ───────────────────────────────────
     with tab1:
         st.markdown(
             '<p class="main-header">Autonomous Deal Sourcing</p>',
@@ -253,14 +243,14 @@ def show_app():
         st.markdown(
             '<p class="sub-header">'
             'Finds 1 new under-the-radar startup per scan. '
-            'Never repeats a startup it has already seen.'
+            'Your history is private to your account.'
             '</p>',
             unsafe_allow_html=True
         )
 
         col1, col2, col3 = st.columns(3)
         col1.metric("This scan finds", "1 startup")
-        col2.metric("Total seen so far", len(seen_names))
+        col2.metric("Your total seen", len(seen_names))
         col3.metric("Model", "Llama 3.3 70B")
 
         st.divider()
@@ -271,12 +261,12 @@ def show_app():
         )
 
         if not can_run:
-            st.warning("Add API keys to your .env file to run scans.")
+            st.warning("Add API keys to your .env file.")
 
         if seen_names:
             st.info(
-                f"Memory active: Agent will skip {len(seen_names)} "
-                f"previously seen startup(s) and find something new."
+                f"Your agent will skip {len(seen_names)} "
+                f"startup(s) you have already seen."
             )
 
         run_button = st.button(
@@ -291,16 +281,21 @@ def show_app():
             os.environ["OPENAI_API_BASE"] = (
                 "https://api.groq.com/openai/v1"
             )
-            os.environ["OPENAI_MODEL_NAME"] = "llama-3.3-70b-versatile"
+            os.environ["OPENAI_MODEL_NAME"] = (
+                "llama-3.3-70b-versatile"
+            )
             os.environ["SERPER_API_KEY"] = serper_key
 
-            filters = {"sector": sector, "stage": stage, "geo": geo}
+            filters = {
+                "sector": sector,
+                "stage": stage,
+                "geo": geo
+            }
 
             from crew import run_pipeline
 
             with st.status(
-                "Agent scanning for a new startup...",
-                expanded=True
+                "Agent scanning...", expanded=True
             ) as status:
                 st.write(
                     f"Sector: **{sector}** | "
@@ -308,17 +303,16 @@ def show_app():
                 )
                 if seen_names:
                     st.write(
-                        f"Skipping previously seen: "
+                        f"Skipping your previously seen: "
                         f"{', '.join(seen_names)}"
                     )
-                st.write("Searching for under-the-radar startup...")
-                st.write("This takes 2 to 5 minutes. Please wait...")
+                st.write("This takes 2 to 5 minutes...")
 
                 memo_result = None
                 error = None
 
                 try:
-                    memo_result = run_pipeline(filters)
+                    memo_result = run_pipeline(filters, user_id)
                     status.update(
                         label="Scan complete!",
                         state="complete",
@@ -334,23 +328,21 @@ def show_app():
                 st.error(f"Error: {error}")
                 if "429" in error or "rate" in error.lower():
                     st.warning(
-                        "Groq rate limit hit. "
-                        "Wait a few minutes then run again."
+                        "Rate limit hit. Wait a few minutes."
                     )
                 else:
-                    st.info("Check your API keys in the .env file.")
+                    st.info("Check your API keys in .env.")
 
             elif memo_result:
                 st.success("New startup found and analyzed!")
                 st.markdown("---")
                 st.markdown(memo_result)
 
-                # ── Confidence score — new addition ───────
                 score_pattern = re.findall(
-                    r"###\s+(.+?)\s+-\s+([\d.]+)/10\s+-\s+(.+?)(?:\n|$)",
+                    r"###\s+(.+?)\s+-\s+([\d.]+)/10"
+                    r"\s+-\s+(.+?)(?:\n|$)",
                     memo_result
                 )
-
                 url_match = re.search(
                     r"\*\*Website:\*\*\s*(https?://\S+)",
                     memo_result
@@ -376,7 +368,7 @@ def show_app():
                     "successfully scraped" in memo_result.lower()
                 )
 
-                startup_data_for_conf = {
+                conf_data = {
                     "website_url": (
                         url_match.group(1) if url_match else ""
                     ),
@@ -398,7 +390,7 @@ def show_app():
                 }
 
                 conf_score, conf_breakdown = calculate_confidence(
-                    startup_data_for_conf
+                    conf_data
                 )
                 conf_lbl = confidence_label(conf_score)
                 conf_col = confidence_color(conf_score)
@@ -449,9 +441,8 @@ def show_app():
                                 use_container_width=True
                             )
                     except Exception as e:
-                        st.warning(f"PDF export unavailable: {e}")
+                        st.warning(f"PDF unavailable: {e}")
 
-                # Save to memory — same as before + new fields
                 try:
                     parsed = []
                     for name, score, rec in score_pattern:
@@ -488,33 +479,24 @@ def show_app():
                     if parsed:
                         save_run(
                             sector, stage, geo,
-                            memo_result, parsed
+                            memo_result, parsed,
+                            user_id  # scoped to this user
                         )
-                        st.caption(
-                            "Saved to memory. "
-                            "Next scan will find a different startup."
-                        )
+                        st.caption("Saved to your history.")
                         st.rerun()
                 except Exception as e:
-                    st.caption(f"Could not save to memory: {e}")
+                    st.caption(f"Could not save: {e}")
 
-    # ── TAB 2: COMPARISON VIEW — new ──────────────────────
+    # ── TAB 2: COMPARISON VIEW ────────────────────────────
     with tab2:
-        st.markdown("### Startup Comparison")
-        st.caption(
-            "All startups analyzed so far, side by side. "
-            "Filter and sort to compare."
-        )
+        st.markdown("### Your Startup Comparison")
+        st.caption("All startups in your history, side by side.")
 
-        all_startups = get_all_startups()
+        all_startups = get_all_startups(user_id)
 
         if not all_startups:
-            st.info(
-                "No startups yet. "
-                "Run your first scan in the New Scan tab."
-            )
+            st.info("No startups yet. Run your first scan.")
         else:
-            # Filter and sort controls
             cf1, cf2, cf3 = st.columns(3)
             with cf1:
                 filter_rec = st.selectbox(
@@ -524,7 +506,8 @@ def show_app():
                 )
             with cf2:
                 sectors_available = list(set(
-                    s["sector"] for s in all_startups if s["sector"]
+                    s["sector"]
+                    for s in all_startups if s["sector"]
                 ))
                 filter_sector = st.selectbox(
                     "Filter by sector",
@@ -554,7 +537,6 @@ def show_app():
                     s for s in filtered
                     if s["sector"] == filter_sector
                 ]
-
             if sort_by == "Score (high to low)":
                 filtered = sorted(
                     filtered,
@@ -576,7 +558,6 @@ def show_app():
                     filtered, key=lambda x: x["name"]
                 )
 
-            # Summary row
             if filtered:
                 scores = [s["score"] for s in filtered if s["score"]]
                 avg_s = sum(scores) / len(scores) if scores else 0
@@ -597,7 +578,6 @@ def show_app():
 
             st.divider()
 
-            # 2-column card grid
             for i in range(0, len(filtered), 2):
                 cols = st.columns(2)
                 for j, col in enumerate(cols):
@@ -613,7 +593,6 @@ def show_app():
                         else "#fee2e2"
                     )
                     conf_bg = confidence_color(conf)
-
                     with col:
                         with st.container(border=True):
                             st.markdown(f"#### {s['name']}")
@@ -635,7 +614,8 @@ def show_app():
                             )
                             st.markdown(
                                 f"**Rec:** {rec}  \n"
-                                f"**Sector:** {s['sector'] or '—'}  \n"
+                                f"**Sector:** "
+                                f"{s['sector'] or '—'}  \n"
                                 f"**Founded:** "
                                 f"{s.get('founded_year') or '—'}  \n"
                                 f"**HQ:** {s['hq_location'] or '—'}"
@@ -652,10 +632,10 @@ def show_app():
                                     f"{'...' if len(arch) > 80 else ''}"
                                 )
 
-    # ── TAB 3: RUN HISTORY — exactly as before ────────────
+    # ── TAB 3: RUN HISTORY ────────────────────────────────
     with tab3:
-        st.markdown("### Run History")
-        runs = get_all_runs()
+        st.markdown("### Your Run History")
+        runs = get_all_runs(user_id)
         if not runs:
             st.info("No runs yet.")
         else:
@@ -677,19 +657,19 @@ def show_app():
                             key=f"dl_{run['id']}"
                         )
 
-    # ── TAB 4: ALL STARTUPS — exactly as before ───────────
+    # ── TAB 4: ALL STARTUPS ───────────────────────────────
     with tab4:
-        st.markdown("### All Startups Found")
+        st.markdown("### Your Startups")
         st.caption(
-            "Every startup ever analyzed. "
-            "Agent will never find these again unless you clear memory."
+            "Every startup in your history. "
+            "Private to your account."
         )
-        startups = get_all_startups()
+        startups = get_all_startups(user_id)
         if not startups:
-            st.info("No startups yet. Run your first scan.")
+            st.info("No startups yet.")
         else:
             col1, col2, col3 = st.columns(3)
-            col1.metric("Total found", len(startups))
+            col1.metric("Your total", len(startups))
             scores = [s["score"] for s in startups if s["score"]]
             avg = sum(scores) / len(scores) if scores else 0
             col2.metric("Avg score", f"{avg:.1f}/10")
@@ -724,14 +704,13 @@ def show_app():
                     unsafe_allow_html=True
                 )
 
-    # ── TAB 5: MY RATINGS — new ───────────────────────────
+    # ── TAB 5: MY RATINGS ─────────────────────────────────
     with tab5:
-        st.markdown("### Rate Startups")
+        st.markdown("### Rate Your Startups")
         st.caption(
-            "Rate each startup by relevance. "
-            "Helps you track which ones are worth following up."
+            "Rate each startup by relevance to your thesis."
         )
-        startups = get_all_startups()
+        startups = get_all_startups(user_id)
         if not startups:
             st.info("No startups to rate yet.")
         else:
@@ -757,19 +736,18 @@ def show_app():
                             f"{s['sector'] or '—'}"
                         )
                     with c2:
-                        current_rating = s.get("user_rating") or 3
-                        new_rating = st.select_slider(
+                        current = s.get("user_rating") or 3
+                        new_r = st.select_slider(
                             "Relevance",
                             options=[1, 2, 3, 4, 5],
-                            value=current_rating,
+                            value=current,
                             key=f"rate_{s['id']}",
-                            help=(
-                                "1 = not relevant, "
-                                "5 = very relevant"
-                            )
+                            help="1=not relevant, 5=very relevant"
                         )
-                        if new_rating != current_rating:
-                            update_user_rating(s["id"], new_rating)
+                        if new_r != current:
+                            update_user_rating(
+                                s["id"], new_r, user_id
+                            )
                             st.caption("Saved.")
 
 

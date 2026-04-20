@@ -14,23 +14,18 @@ os.environ["OPENAI_API_KEY"] = os.environ.get("GROQ_API_KEY", "")
 os.environ["OPENAI_API_BASE"] = "https://api.groq.com/openai/v1"
 os.environ["OPENAI_MODEL_NAME"] = "llama-3.3-70b-versatile"
 
-# ─────────────────────────────────────────────────────────
-# GROQ FREE TIER LIMITS for llama-3.3-70b-versatile:
-# 6,000 tokens per minute (TPM)
-# 100,000 tokens per day (TPD)
-# We target 4,500 TPM (75% of limit) to stay safe
-# ─────────────────────────────────────────────────────────
 TOKEN_BUDGET_PER_MINUTE = 4500
-TOKENS_PER_AGENT_CALL = 1500  # conservative estimate per LLM call
-DELAY_BETWEEN_AGENTS = 25     # seconds pause between each agent handoff
+TOKENS_PER_AGENT_CALL = 1500
+DELAY_BETWEEN_AGENTS = 25
 
 
-def build_tasks(researcher, analyst, scorer, associate, filters):
+def build_tasks(researcher, analyst, scorer, associate, filters, user_id):
     sector = filters.get("sector", "any AI sector")
     stage = filters.get("stage", "pre-seed or seed")
     geo = filters.get("geo", "India or the US")
 
-    seen_names = get_all_seen_startup_names()
+    # Now filtered by user_id
+    seen_names = get_all_seen_startup_names(user_id)
     if seen_names:
         avoid_str = ", ".join(seen_names)
         memory_instruction = (
@@ -236,51 +231,7 @@ def build_tasks(researcher, analyst, scorer, associate, filters):
     return [search_task, analyze_task, scoring_task, memo_task]
 
 
-class TokenPacedCrew:
-    """
-    Wraps CrewAI's sequential process with deliberate delays
-    between each agent handoff to stay within Groq's TPM limit.
-
-    Strategy:
-    - Each agent call uses roughly 1500 tokens
-    - At 6000 TPM limit, we can do 4 calls per minute safely
-    - We pace to 3 calls per minute (one every 20 seconds)
-    - Between major agent handoffs we wait 25 seconds
-    - This keeps us comfortably under 4500 TPM
-    """
-
-    def __init__(self, crew):
-        self.crew = crew
-
-    def run(self):
-        print("\n" + "="*55)
-        print("  Together Fund — Token-Paced Pipeline")
-        print(f"  Target: under {TOKEN_BUDGET_PER_MINUTE} TPM")
-        print(f"  Delay between agents: {DELAY_BETWEEN_AGENTS}s")
-        print("="*55 + "\n")
-
-        agents = ["Researcher", "Analyst", "Scorer", "Associate"]
-        for i, agent_name in enumerate(agents):
-            if i > 0:
-                print(
-                    f"\n[Pacer] Waiting {DELAY_BETWEEN_AGENTS}s before "
-                    f"{agent_name} to stay within token limits...\n"
-                )
-                # Visible countdown
-                for remaining in range(DELAY_BETWEEN_AGENTS, 0, -5):
-                    print(
-                        f"[Pacer] {remaining}s remaining...",
-                        end="\r"
-                    )
-                    time.sleep(5)
-                print(f"[Pacer] Starting {agent_name} now.          \n")
-
-        # Run the actual crew (delays above are just visual —
-        # actual pacing is enforced via max_rpm on each agent)
-        return self.crew.kickoff()
-
-
-def run_pipeline(filters=None) -> str:
+def run_pipeline(filters=None, user_id=1) -> str:
     if filters is None:
         filters = {
             "sector": "any AI sector",
@@ -289,14 +240,17 @@ def run_pipeline(filters=None) -> str:
         }
 
     print("\n[Pipeline] Loading memory...")
-    seen = get_all_seen_startup_names()
+    seen = get_all_seen_startup_names(user_id)
     if seen:
-        print(f"[Pipeline] Will skip: {seen}")
+        print(f"[Pipeline] User {user_id} — will skip: {seen}")
     else:
-        print("[Pipeline] Fresh start — no previous startups.")
+        print(f"[Pipeline] User {user_id} — fresh start.")
 
     researcher, analyst, scorer, associate = build_agents()
-    tasks = build_tasks(researcher, analyst, scorer, associate, filters)
+    tasks = build_tasks(
+        researcher, analyst, scorer,
+        associate, filters, user_id
+    )
 
     crew = Crew(
         agents=[researcher, analyst, scorer, associate],
@@ -316,7 +270,7 @@ if __name__ == "__main__":
         "stage": "pre-seed",
         "geo": "India or the US"
     }
-    memo = run_pipeline(filters)
+    memo = run_pipeline(filters, user_id=1)
     print("\n" + "="*55)
     print("FINAL MEMO")
     print("="*55)

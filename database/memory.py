@@ -15,7 +15,15 @@ def get_connection():
 
 def initialize_db():
     with get_connection() as conn:
-        # Original tables — unchanged
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                full_name TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,7 +32,9 @@ def initialize_db():
                 stage_filter TEXT,
                 geo_filter TEXT,
                 raw_memo TEXT,
-                total_startups_found INTEGER
+                total_startups_found INTEGER,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
         conn.execute("""
@@ -40,26 +50,34 @@ def initialize_db():
                 recommendation TEXT,
                 one_line_summary TEXT,
                 full_profile_json TEXT,
+                founded_year TEXT,
+                ai_architecture TEXT,
+                competitors TEXT,
+                confidence_score REAL,
+                confidence_breakdown TEXT,
+                user_rating INTEGER,
+                user_id INTEGER,
                 FOREIGN KEY (run_id) REFERENCES runs(id),
-                UNIQUE(name COLLATE NOCASE)
-            )
-        """)
-
-        # Users table — new, only created if not exists
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                full_name TEXT,
-                created_at TEXT NOT NULL
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
         conn.commit()
 
-        # Safely add new columns to startups if they don't exist
-        # ALTER TABLE only runs if column is missing — never breaks existing data
-        new_columns = [
+        # Safely add any missing columns to existing tables
+        new_run_cols = [("user_id", "INTEGER")]
+        existing_run_cols = [
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(runs)"
+            ).fetchall()
+        ]
+        for col_name, col_type in new_run_cols:
+            if col_name not in existing_run_cols:
+                conn.execute(
+                    f"ALTER TABLE runs ADD COLUMN "
+                    f"{col_name} {col_type}"
+                )
+
+        new_startup_cols = [
             ("founded_year", "TEXT"),
             ("ai_architecture", "TEXT"),
             ("competitors", "TEXT"),
@@ -68,17 +86,18 @@ def initialize_db():
             ("user_rating", "INTEGER"),
             ("user_id", "INTEGER"),
         ]
-        existing = [
+        existing_startup_cols = [
             row[1] for row in conn.execute(
                 "PRAGMA table_info(startups)"
             ).fetchall()
         ]
-        for col_name, col_type in new_columns:
-            if col_name not in existing:
+        for col_name, col_type in new_startup_cols:
+            if col_name not in existing_startup_cols:
                 conn.execute(
                     f"ALTER TABLE startups ADD COLUMN "
                     f"{col_name} {col_type}"
                 )
+
         conn.commit()
 
 
@@ -111,7 +130,6 @@ def create_user(
 
 
 def verify_user(username: str, password: str):
-    """Returns user dict if valid, None if not."""
     with get_connection() as conn:
         row = conn.execute(
             """SELECT * FROM users
@@ -124,29 +142,41 @@ def verify_user(username: str, password: str):
     return dict(row) if row else None
 
 
-# ── ORIGINAL FUNCTIONS — completely unchanged ─────────────
+# ── ALL FUNCTIONS NOW TAKE user_id ────────────────────────
 
-def get_all_seen_startup_names() -> list:
+def get_all_seen_startup_names(user_id: int) -> list:
+    """
+    Returns names of startups THIS user has already analyzed.
+    Agent will skip these when searching for new ones.
+    """
     try:
         with get_connection() as conn:
             rows = conn.execute(
-                "SELECT name FROM startups ORDER BY id DESC"
+                """SELECT name FROM startups
+                   WHERE user_id = ?
+                   ORDER BY id DESC""",
+                (user_id,)
             ).fetchall()
         return [row["name"] for row in rows]
     except Exception:
         return []
 
 
-def save_run(sector, stage, geo, memo, startups) -> int:
+def save_run(
+    sector, stage, geo, memo, startups,
+    user_id: int
+) -> int:
     with get_connection() as conn:
         cursor = conn.execute(
             """INSERT INTO runs
                (run_timestamp, sector_filter, stage_filter,
-                geo_filter, raw_memo, total_startups_found)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+                geo_filter, raw_memo, total_startups_found,
+                user_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 datetime.now().isoformat(),
-                sector, stage, geo, memo, len(startups)
+                sector, stage, geo, memo,
+                len(startups), user_id
             )
         )
         run_id = cursor.lastrowid
@@ -160,8 +190,9 @@ def save_run(sector, stage, geo, memo, startups) -> int:
                         recommendation, one_line_summary,
                         full_profile_json, founded_year,
                         ai_architecture, competitors,
-                        confidence_score, confidence_breakdown)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        confidence_score, confidence_breakdown,
+                        user_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
                         run_id,
                         s.get("name", ""),
@@ -178,6 +209,7 @@ def save_run(sector, stage, geo, memo, startups) -> int:
                         s.get("competitors", ""),
                         s.get("confidence_score", 0.0),
                         s.get("confidence_breakdown", ""),
+                        user_id,
                     )
                 )
             except Exception as e:
@@ -187,42 +219,63 @@ def save_run(sector, stage, geo, memo, startups) -> int:
     return run_id
 
 
-def get_all_runs() -> list:
+def get_all_runs(user_id: int) -> list:
+    """Returns only THIS user's runs."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM runs ORDER BY run_timestamp DESC LIMIT 20"
+            """SELECT * FROM runs
+               WHERE user_id = ?
+               ORDER BY run_timestamp DESC
+               LIMIT 20""",
+            (user_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_all_startups() -> list:
+def get_all_startups(user_id: int) -> list:
+    """Returns only THIS user's startups."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM startups ORDER BY score DESC"
+            """SELECT * FROM startups
+               WHERE user_id = ?
+               ORDER BY score DESC""",
+            (user_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def startup_already_analyzed(name: str) -> bool:
+def startup_already_analyzed(name: str, user_id: int) -> bool:
     with get_connection() as conn:
         result = conn.execute(
-            "SELECT id FROM startups WHERE LOWER(name) = LOWER(?)",
-            (name,)
+            """SELECT id FROM startups
+               WHERE LOWER(name) = LOWER(?)
+               AND user_id = ?""",
+            (name, user_id)
         ).fetchone()
     return result is not None
 
 
-def clear_memory():
+def clear_memory(user_id: int):
+    """Wipe only THIS user's history."""
     with get_connection() as conn:
-        conn.execute("DELETE FROM startups")
-        conn.execute("DELETE FROM runs")
+        conn.execute(
+            "DELETE FROM startups WHERE user_id = ?",
+            (user_id,)
+        )
+        conn.execute(
+            "DELETE FROM runs WHERE user_id = ?",
+            (user_id,)
+        )
         conn.commit()
 
 
-def update_user_rating(startup_id: int, rating: int):
+def update_user_rating(
+    startup_id: int, rating: int, user_id: int
+):
     with get_connection() as conn:
         conn.execute(
-            "UPDATE startups SET user_rating = ? WHERE id = ?",
-            (rating, startup_id)
+            """UPDATE startups SET user_rating = ?
+               WHERE id = ? AND user_id = ?""",
+            (rating, startup_id, user_id)
         )
         conn.commit()
