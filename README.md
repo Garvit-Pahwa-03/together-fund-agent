@@ -2,7 +2,7 @@
 
 > A production-grade, 4-agent AI pipeline that autonomously sources, evaluates, scores, and generates investment memos for early-stage AI startups — built for Together Fund's thesis of backing Indian founders in AI.
 
-**[Live Demo →]([https://your-streamlit-url.streamlit.app](https://together-fund-agent-xba3af8clrugxdrrgzpcfs.streamlit.app/))** &nbsp;|&nbsp; **[GitHub →](https://github.com/Garvit-Pahwa-03/together-fund-agent)**
+**[Live Demo →](https://together-fund-agent-xba3af8clrugxdrrgzpcfs.streamlit.app/)** &nbsp;|&nbsp; **[GitHub →](https://github.com/Garvit-Pahwa-03/together-fund-agent)**
 
 ---
 
