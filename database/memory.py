@@ -15,8 +15,8 @@ _client = None
 def get_db():
     """
     Returns MongoDB database object.
-    Uses a module-level cached client to avoid
-    reconnecting on every function call.
+    Uses explicit TLS config to fix SSL handshake
+    failures on Streamlit Cloud Python 3.11.
     """
     global _client
     uri = os.environ.get("MONGO_URI", "")
@@ -27,7 +27,12 @@ def get_db():
         )
     if _client is None:
         _client = MongoClient(
-            uri, serverSelectionTimeoutMS=5000
+            uri,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=20000,
+            tls=True,
+            tlsAllowInvalidCertificates=False,
         )
     return _client["together_fund"]
 
@@ -37,27 +42,18 @@ def get_db():
 def initialize_db():
     """
     Creates indexes on first run.
-    Safe to call on every app startup —
+    Safe to call on every app startup.
     MongoDB ignores indexes that already exist.
     """
     try:
         db = get_db()
-
-        # Unique username
-        db.users.create_index(
-            "username", unique=True
-        )
-
-        # Fast per-user lookups
+        db.users.create_index("username", unique=True)
         db.startups.create_index("user_id")
         db.runs.create_index("user_id")
-
-        # Prevent same user finding same startup twice
         db.startups.create_index(
             [("user_id", 1), ("name_lower", 1)],
             unique=True
         )
-
     except Exception as e:
         print(f"[DB] initialize_db: {e}")
 
@@ -75,7 +71,7 @@ def create_user(
 ) -> bool:
     """
     Creates a new user account.
-    Returns True on success, False if username taken.
+    Returns True on success, False if username already taken.
     """
     try:
         db = get_db()
@@ -97,7 +93,7 @@ def verify_user(username: str, password: str):
     """
     Returns user dict if credentials are valid.
     Returns None if invalid.
-    Adds 'id' key as string for session storage.
+    Converts ObjectId to string for session storage.
     """
     try:
         db = get_db()
@@ -106,8 +102,6 @@ def verify_user(username: str, password: str):
             "password_hash": hash_password(password)
         })
         if user:
-            # Convert ObjectId to string so it can
-            # be stored in st.session_state
             user["id"] = str(user["_id"])
             user["_id"] = str(user["_id"])
             return user
@@ -117,7 +111,7 @@ def verify_user(username: str, password: str):
         return None
 
 
-# ── MEMORY ────────────────────────────────────────────────
+# ── MEMORY — all functions take user_id ───────────────────
 
 def get_all_seen_startup_names(user_id) -> list:
     """
@@ -172,7 +166,9 @@ def save_run(
                     "user_id": str(user_id),
                     "run_id": run_id,
                     "name": s.get("name", ""),
-                    "name_lower": s.get("name", "").lower().strip(),
+                    "name_lower": (
+                        s.get("name", "").lower().strip()
+                    ),
                     "website_url": s.get("website_url", ""),
                     "sector": s.get("sector", ""),
                     "founders": s.get("founders", ""),
@@ -180,10 +176,16 @@ def save_run(
                     "founded_year": s.get("founded_year", ""),
                     "score": s.get("score", 0.0),
                     "recommendation": s.get("recommendation", ""),
-                    "one_line_summary": s.get("one_line_summary", ""),
-                    "ai_architecture": s.get("ai_architecture", ""),
+                    "one_line_summary": s.get(
+                        "one_line_summary", ""
+                    ),
+                    "ai_architecture": s.get(
+                        "ai_architecture", ""
+                    ),
                     "competitors": s.get("competitors", ""),
-                    "confidence_score": s.get("confidence_score", 0.0),
+                    "confidence_score": s.get(
+                        "confidence_score", 0.0
+                    ),
                     "confidence_breakdown": s.get(
                         "confidence_breakdown", ""
                     ),
@@ -207,7 +209,7 @@ def save_run(
 
 def get_all_runs(user_id) -> list:
     """
-    Returns this user's run history, newest first.
+    Returns this user's run history newest first.
     Each dict has an 'id' key for use in Streamlit keys.
     """
     try:
@@ -230,7 +232,7 @@ def get_all_runs(user_id) -> list:
 
 def get_all_startups(user_id) -> list:
     """
-    Returns this user's startups, highest score first.
+    Returns this user's startups highest score first.
     Each dict has an 'id' key for use in Streamlit keys.
     """
     try:
@@ -287,7 +289,7 @@ def update_user_rating(
     user_id
 ) -> None:
     """
-    Updates the user's rating for one startup.
+    Updates this user's rating for one startup.
     The user_id check ensures users can only rate
     their own startups.
     """

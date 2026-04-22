@@ -1,5 +1,5 @@
 setuptools
-pymongo[srv]==4.6.3
+pymongo[srv]==4.7.3
 crewai==0.28.8
 crewai-tools==0.1.6
 streamlit>=1.32.0
