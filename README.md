@@ -21,7 +21,7 @@ Each scan:
 
 ## System Architecture
 
-![Together Fund Agent Architecture](architecture.svg)
+![Together Fund Agent Architecture](diagram-export-4-22-2026-6_32_16-PM.png)
 
 ## The 4-Agent Pipeline
 
