@@ -19,6 +19,10 @@ Each scan:
 
 ---
 
+## System Architecture
+
+![Together Fund Agent Architecture](architecture.svg)
+
 ## The 4-Agent Pipeline
 
 ```
